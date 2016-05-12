@@ -1,4 +1,0 @@
-package rs
-
-func init() {
-}
