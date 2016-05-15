@@ -9,25 +9,23 @@ import (
 )
 
 type (
+	RESTPart struct {
+		Flag   byte
+		Data   []byte
+		Length int
+	}
+	REST struct {
+		Success bool
+		Message string
+		Parts   []RESTPart
+	}
 	Request struct {
 		Command string
 		Args    [][]byte
 	}
-	Response struct {
-		Success bool
-		Message string
-		Data    []byte
-		Length  int
-	}
-	RedisCommand struct {
-		Request
-		Response
-	}
 
 	Parser struct {
-		rw     *bufio.ReadWriter
-		cmd    chan RedisCommand
-		server bool
+		r *bufio.Reader
 	}
 )
 
@@ -51,161 +49,105 @@ func EncodeRequest(r Request) []byte {
 	return d.Bytes()
 }
 
-func EncodeResponse(r Response) []byte {
-	var d bytes.Buffer
-	if r.Success {
-		if len(r.Data) > 0 {
-			d.WriteByte('$')
-			d.WriteString(strconv.Itoa(len(r.Data)))
-			d.WriteString("\r\n")
-			d.Write(r.Data)
-		} else if len(r.Message) > 0 {
-			d.WriteByte('+')
-			d.WriteString(r.Message)
-		} else {
-			d.WriteByte(':')
-			d.WriteString(strconv.Itoa(r.Length))
-		}
-	} else {
-		d.WriteByte('-')
-		d.WriteString(r.Message)
+func DumpREST(r *REST) string {
+	if r == nil {
+		return "<nil>"
 	}
-	d.WriteString("\r\n")
-	return d.Bytes()
-}
-
-func NewParser(r io.Reader, w io.Writer) *Parser {
-	ret := &Parser{}
-	ret.rw = bufio.NewReadWriter(bufio.NewReaderSize(r, 65536), bufio.NewWriterSize(w, 65536))
-	ret.cmd = make(chan RedisCommand, 1)
-	return nil
-}
-
-func (p *Parser) AsServer() {
-	p.server = true
-}
-
-func (p *Parser) AsClient() {
-	p.server = false
-}
-
-func (p *Parser) GetMonitor() <-chan RedisCommand {
-	return p.cmd
-}
-
-func (p *Parser) SendRequest(r Request) error {
-	_, err := p.rw.Write(EncodeRequest(r))
-	if err == nil {
-		err = p.rw.Flush()
-	}
-	return err
-}
-
-func (p *Parser) SendResponse(r Response) error {
-	_, err := p.rw.Write(EncodeResponse(r))
-	if err == nil {
-		err = p.rw.Flush()
-	}
-	return err
-}
-
-func (p *Parser) fail(bs ...[]byte) error {
 	var buf bytes.Buffer
-	for _, b := range bs {
-		buf.Write(b)
+	buf.WriteByte('{')
+	buf.WriteString("Success:")
+	if r.Success {
+		buf.WriteString("true")
+	} else {
+		buf.WriteString("false")
 	}
-	resp := Response{}
-	resp.Success = false
-	resp.Message = buf.String()
-	return p.SendResponse(resp)
+	buf.WriteString(" Message:\"")
+	buf.WriteString(r.Message)
+	buf.WriteString("\"\r\n")
+	for _, p := range r.Parts {
+		buf.WriteString("  {")
+		buf.WriteString("Flag:'")
+		buf.WriteString(string(p.Flag))
+		buf.WriteString("' Data:\"")
+		buf.WriteString(string(p.Data))
+		buf.WriteString("\" Length:")
+		buf.WriteString(strconv.Itoa(p.Length))
+		buf.WriteString("}\r\n")
+	}
+	buf.WriteByte('}')
+	return buf.String()
 }
 
-func (p *Parser) get_flag() (byte, error) {
-	b, err := p.rw.ReadByte()
-	if err != nil {
-		return 0, err
-	}
-	return b, nil
+func NewParser(r io.Reader) *Parser {
+	ret := &Parser{}
+	ret.r = bufio.NewReaderSize(r, 65536)
+	return ret
 }
 
-func (p *Parser) get_int() (int, error) {
-	d, _, err := p.rw.ReadLine()
+func (p *Parser) read_rest_part() (*RESTPart, error) {
+	ret := &RESTPart{}
+	line, _, err := p.r.ReadLine()
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	ret, err := strconv.ParseInt(string(d), 10, 32)
-	if err != nil {
-		return 0, err
-	}
-	return int(ret), nil
-}
-
-func (p *Parser) get_string() (string, error) {
-	d, _, err := p.rw.ReadLine()
-	if err != nil {
-		return "", err
-	}
-	return string(d), nil
-}
-
-func (p *Parser) get_data(l int) ([]byte, error) {
-	d := make([]byte, l+2)
-	pos := 0
-	var err error = nil
-	var n int = 0
-	for ; err == nil && n < (l-pos); n, err = p.rw.Read(d[pos:]) {
-	}
-	if err != nil {
-		return []byte{}, nil
-	}
-	//if d[l] != '\r' || d[l+1] != '\n' {
-	//	return []byte{}, "不正确的数据格式"
-	//}
-	return d[:l], nil
-}
-
-func (p *Parser) read_one_request() error {
-	flag, err := p.get_flag()
-	if err != nil {
-		return err
-	}
-	if flag != '*' {
-		str, err := p.get_string()
-		if err != nil {
-			return err
-		}
-		if err = p.fail([]byte("ERR unknown command '"), []byte{flag}, []byte(str), []byte{'\''}); err != nil {
-			return err
-		}
-		return nil
-	}
-	m, err := p.get_int()
-	if err != nil {
-		if err = p.fail([]byte("ERR Protocol error: invalid multibulk length")); err != nil {
-			return err
-		}
-		return err
-	}
-	for i := 0; i < m; i++ {
-	}
-	return nil
-}
-
-func (p *Parser) read_one_response() error {
-	return nil
-}
-
-func (p *Parser) read_routine() {
-	defer close(p.cmd)
-	for {
+	read_block := func(length int) ([]byte, error) {
+		d := make([]byte, length+2)
+		pos := 0
 		var err error
-		if p.server {
-			err = p.read_one_request()
-		} else {
-			err = p.read_one_response()
+		for n := 0; n < (length+2-pos) && err == nil; n, err = p.r.Read(d[pos:]) {
+			pos += n
 		}
 		if err != nil {
-			return
+			return nil, err
 		}
+		// TODO 可以在此处检查结尾是否\r\n，Redis的默认实现是不检查，直接跳过2个字节
+		return d[:length], err
 	}
+	ret.Flag = line[0]
+	switch ret.Flag {
+	case '+', '-':
+		ret.Data = line[1:]
+	case ':', '*':
+		if l, err := strconv.ParseInt(string(line[1:]), 10, 32); err != nil {
+			return nil, err
+		} else {
+			ret.Length = int(l)
+		}
+	case '$':
+		if l, err := strconv.ParseInt(string(line[1:]), 10, 32); err != nil {
+			return nil, err
+		} else if ret.Data, err = read_block(int(l)); err != nil {
+			return nil, err
+		}
+	default:
+		ret.Flag = 0
+		ret.Data = line
+	}
+	return ret, nil
+}
+
+func (p *Parser) ReadREST() (*REST, error) {
+	ret := &REST{Success: true, Parts: make([]RESTPart, 0)}
+	part, err := p.read_rest_part()
+	if err != nil {
+		return nil, err
+	}
+	switch part.Flag {
+	case '-':
+		ret.Success = false
+		fallthrough
+	case '+':
+		ret.Message = string(part.Data)
+	case '*':
+		for i := 0; i < part.Length; i++ {
+			if pt, err := p.read_rest_part(); err != nil {
+				return nil, err
+			} else {
+				ret.Parts = append(ret.Parts, *pt)
+			}
+		}
+	default:
+		ret.Parts = append(ret.Parts, *part)
+	}
+	return ret, nil
 }
