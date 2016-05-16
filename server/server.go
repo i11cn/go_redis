@@ -2,6 +2,7 @@ package server
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"github.com/i11cn/go_redis/protocol"
 	"net"
@@ -25,7 +26,11 @@ type (
 )
 
 func NewRedisServer() *RedisServer {
-	return &RedisServer{handlers: make([]CommandHandler, 0), handle: make(map[string]HandleFunc)}
+	ret := &RedisServer{handlers: make([]CommandHandler, 0), handle: make(map[string]HandleFunc)}
+	ret.HandleFunc("quit", func([]protocol.RESTPart) (*protocol.REST, error) {
+		return nil, errors.New("客户端主动关闭连接")
+	})
+	return ret
 }
 
 func (s *RedisServer) Start(port int) error {
