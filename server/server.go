@@ -13,62 +13,29 @@ func init() {
 
 type (
 	CommandHandler interface {
-		SetHandle(cmd string, f func([]protocol.RESTPart) (*protocol.REST, error))
-		RemoveHandle(cmd string)
-		GetHandle(cmd string) func([]protocol.RESTPart) (*protocol.REST, error)
+		Serve(*bufio.Writer, *protocol.REST) (bool, error)
 	}
 
 	RedisServer struct {
 		conn     net.Listener
 		handlers []CommandHandler
-	}
-
-	default_handler struct {
-		handle map[string]func([]protocol.RESTPart) (*protocol.REST, error)
+		handle   map[string]func([]protocol.RESTPart) (*protocol.REST, error)
 	}
 )
 
-func (d *default_handler) SetHandle(cmd string, f func([]protocol.RESTPart) (*protocol.REST, error)) {
-	if d.handle == nil {
-		d.handle = make(map[string]func([]protocol.RESTPart) (*protocol.REST, error))
-	}
-	d.handle[cmd] = f
-}
-
-func (d *default_handler) RemoveHandle(cmd string) {
-	if d.handle != nil {
-		delete(d.handle, cmd)
-	}
-}
-
-func (d *default_handler) GetHandle(cmd string) func([]protocol.RESTPart) (*protocol.REST, error) {
-	if d.handle != nil {
-		if ret, exist := d.handle[cmd]; exist {
-			return ret
-		}
-	}
-	return nil
-}
-
 func NewRedisServer() *RedisServer {
-	return &RedisServer{handlers: []CommandHandler{&default_handler{}}}
+	return &RedisServer{handlers: make([]CommandHandler, 0), handle: make(map[string]func([]protocol.RESTPart) (*protocol.REST, error))}
 }
 
-func (s *RedisServer) process_rest(w *bufio.Writer, r *protocol.REST) error {
-	fmt.Println(protocol.DumpREST(r))
+func (s *RedisServer) Serve(w *bufio.Writer, r *protocol.REST) (bool, error) {
 	if len(r.Parts) > 0 {
 		cmd := string(r.Parts[0].Data)
-		var resp *protocol.REST
 		for _, h := range s.handlers {
-			var err error
-			if f := h.GetHandle(strings.ToUpper(cmd)); f != nil {
-				resp, err = f(r.Parts[1:])
-				if err != nil {
-					return err
-				}
-				break
+			if p, err := h.Serve(w, r); p || err != nil {
+				return true, err
 			}
 		}
+		var resp *protocol.REST
 		fmt.Println(protocol.DumpREST(resp))
 		if resp == nil {
 			var msg string
@@ -87,9 +54,9 @@ func (s *RedisServer) process_rest(w *bufio.Writer, r *protocol.REST) error {
 		if err == nil {
 			err = w.Flush()
 		}
-		return err
+		return true, err
 	}
-	return nil
+	return true, nil
 }
 
 func (s *RedisServer) serve(conn net.Conn) {
@@ -101,8 +68,19 @@ func (s *RedisServer) serve(conn net.Conn) {
 		if err != nil {
 			return
 		}
-		if err = s.process_rest(writer, r); err != nil {
-			return
+		fmt.Println(protocol.DumpREST(r))
+		p := false
+		for _, h := range s.handlers {
+			if p, err = h.Serve(writer, r); err != nil {
+				return
+			} else if p {
+				break
+			}
+		}
+		if !p {
+			if _, err = s.Serve(writer, r); err != nil {
+				return
+			}
 		}
 	}
 }
@@ -130,5 +108,5 @@ func (s *RedisServer) Handle(h CommandHandler) {
 }
 
 func (s *RedisServer) HandleFunc(cmd string, f func([]protocol.RESTPart) (*protocol.REST, error)) {
-	s.handlers[len(s.handlers)-1].SetHandle(strings.ToUpper(cmd), f)
+	s.handle[strings.ToUpper(cmd)] = f
 }
