@@ -29,6 +29,46 @@ type (
 	}
 )
 
+func set_multi_parts(buf bytes.Buffer, i int) {
+	buf.WriteByte('*')
+	buf.WriteString(strconv.Itoa(i))
+	buf.WriteString("\r\n")
+
+}
+
+func add_part(buf bytes.Buffer, p RESTPart) {
+	if len(p.Data) > 0 {
+		buf.WriteByte('$')
+		buf.WriteString(strconv.Itoa(len(p.Data)))
+		buf.WriteString("\r\n")
+		buf.Write(p.Data)
+	} else {
+		buf.WriteByte(':')
+		buf.WriteString(strconv.Itoa(p.Length))
+	}
+	buf.WriteString("\r\n")
+}
+
+func EncodeREST(r *REST) []byte {
+	var buf bytes.Buffer
+	total_part := len(r.Parts)
+	if total_part > 0 {
+		set_multi_parts(buf, total_part)
+		for _, p := range r.Parts {
+			add_part(buf, p)
+		}
+	} else if r.Success {
+		buf.WriteByte('+')
+		buf.WriteString(r.Message)
+		buf.WriteString("\r\n")
+	} else {
+		buf.WriteByte('-')
+		buf.WriteString(r.Message)
+		buf.WriteString("\r\n")
+	}
+	return buf.Bytes()
+}
+
 func EncodeRequest(r Request) []byte {
 	var d bytes.Buffer
 	if len(r.Command) > 0 {
