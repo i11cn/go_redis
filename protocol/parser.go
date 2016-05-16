@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"io"
 	"strconv"
-	"strings"
 )
 
 type (
@@ -19,43 +18,19 @@ type (
 		Message string
 		Parts   []RESTPart
 	}
-	Request struct {
-		Command string
-		Args    [][]byte
-	}
 
 	Parser struct {
 		r *bufio.Reader
 	}
 )
 
-func set_multi_parts(buf bytes.Buffer, i int) {
-	buf.WriteByte('*')
-	buf.WriteString(strconv.Itoa(i))
-	buf.WriteString("\r\n")
-
-}
-
-func add_part(buf bytes.Buffer, p RESTPart) {
-	if len(p.Data) > 0 {
-		buf.WriteByte('$')
-		buf.WriteString(strconv.Itoa(len(p.Data)))
-		buf.WriteString("\r\n")
-		buf.Write(p.Data)
-	} else {
-		buf.WriteByte(':')
-		buf.WriteString(strconv.Itoa(p.Length))
-	}
-	buf.WriteString("\r\n")
-}
-
 func EncodeREST(r *REST) []byte {
 	var buf bytes.Buffer
 	total_part := len(r.Parts)
 	if total_part > 0 {
-		set_multi_parts(buf, total_part)
+		set_multi_parts(&buf, total_part)
 		for _, p := range r.Parts {
-			add_part(buf, p)
+			add_part(&buf, p)
 		}
 	} else if r.Success {
 		buf.WriteByte('+')
@@ -67,26 +42,6 @@ func EncodeREST(r *REST) []byte {
 		buf.WriteString("\r\n")
 	}
 	return buf.Bytes()
-}
-
-func EncodeRequest(r Request) []byte {
-	var d bytes.Buffer
-	if len(r.Command) > 0 {
-		total := len(r.Args)
-		d.WriteByte('*')
-		d.WriteString(strconv.Itoa(total + 1))
-		d.WriteString("\r\n")
-		d.WriteString(strings.ToUpper(r.Command))
-		d.WriteString("\r\n")
-		for _, b := range r.Args {
-			d.WriteByte('$')
-			d.WriteString(strconv.Itoa(len(b)))
-			d.WriteString("\r\n")
-			d.Write(b)
-			d.WriteString("\r\n")
-		}
-	}
-	return d.Bytes()
 }
 
 func DumpREST(r *REST) string {
@@ -122,6 +77,32 @@ func NewParser(r io.Reader) *Parser {
 	ret := &Parser{}
 	ret.r = bufio.NewReaderSize(r, 65536)
 	return ret
+}
+
+func (p *Parser) ReadREST() (*REST, error) {
+	ret := &REST{Success: true, Parts: make([]RESTPart, 0)}
+	part, err := p.read_rest_part()
+	if err != nil {
+		return nil, err
+	}
+	switch part.Flag {
+	case '-':
+		ret.Success = false
+		fallthrough
+	case '+':
+		ret.Message = string(part.Data)
+	case '*':
+		for i := 0; i < part.Length; i++ {
+			if pt, err := p.read_rest_part(); err != nil {
+				return nil, err
+			} else {
+				ret.Parts = append(ret.Parts, *pt)
+			}
+		}
+	default:
+		ret.Parts = append(ret.Parts, *part)
+	}
+	return ret, nil
 }
 
 func (p *Parser) read_rest_part() (*RESTPart, error) {
@@ -166,28 +147,22 @@ func (p *Parser) read_rest_part() (*RESTPart, error) {
 	return ret, nil
 }
 
-func (p *Parser) ReadREST() (*REST, error) {
-	ret := &REST{Success: true, Parts: make([]RESTPart, 0)}
-	part, err := p.read_rest_part()
-	if err != nil {
-		return nil, err
+func set_multi_parts(buf *bytes.Buffer, i int) {
+	buf.WriteByte('*')
+	buf.WriteString(strconv.Itoa(i))
+	buf.WriteString("\r\n")
+
+}
+
+func add_part(buf *bytes.Buffer, p RESTPart) {
+	if len(p.Data) > 0 {
+		buf.WriteByte('$')
+		buf.WriteString(strconv.Itoa(len(p.Data)))
+		buf.WriteString("\r\n")
+		buf.Write(p.Data)
+	} else {
+		buf.WriteByte(':')
+		buf.WriteString(strconv.Itoa(p.Length))
 	}
-	switch part.Flag {
-	case '-':
-		ret.Success = false
-		fallthrough
-	case '+':
-		ret.Message = string(part.Data)
-	case '*':
-		for i := 0; i < part.Length; i++ {
-			if pt, err := p.read_rest_part(); err != nil {
-				return nil, err
-			} else {
-				ret.Parts = append(ret.Parts, *pt)
-			}
-		}
-	default:
-		ret.Parts = append(ret.Parts, *part)
-	}
-	return ret, nil
+	buf.WriteString("\r\n")
 }
