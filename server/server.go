@@ -3,7 +3,7 @@ package server
 import (
 	"bufio"
 	"fmt"
-	"go_redis/protocol"
+	"github.com/i11cn/go_redis/protocol"
 	"net"
 	"strings"
 )
