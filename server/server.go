@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/i11cn/go_redis/protocol"
 	"net"
+	"reflect"
 	"strings"
 )
 
@@ -24,6 +25,26 @@ type (
 		handle   map[string]HandleFunc
 	}
 )
+
+func NewREST(datas ...interface{}) *protocol.REST {
+	ret := &protocol.REST{true, "", make([]protocol.RESTPart, 0, len(datas))}
+	for _, d := range datas {
+		switch o := d.(type) {
+		case int, int8, int16, int32, int64:
+			ret.Parts = append(ret.Parts, protocol.RESTPart{':', []byte{}, int(reflect.ValueOf(o).Int())})
+		case uint, uint8, uint16, uint32, uint64:
+			ret.Parts = append(ret.Parts, protocol.RESTPart{':', []byte{}, int(reflect.ValueOf(o).Uint())})
+		case []byte:
+			ret.Parts = append(ret.Parts, protocol.RESTPart{'$', o, len(o)})
+		}
+	}
+	return ret
+}
+
+func NewErrorREST(msgs ...string) *protocol.REST {
+	msg := fmt.Sprint("ERR ", strings.Join(msgs, ""))
+	return &protocol.REST{false, msg, []protocol.RESTPart{}}
+}
 
 func NewRedisServer() *RedisServer {
 	ret := &RedisServer{handlers: make([]CommandHandler, 0), handle: make(map[string]HandleFunc)}
