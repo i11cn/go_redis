@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/i11cn/go_redis/protocol"
 	"net"
-	"reflect"
 	"strings"
 )
 
@@ -14,40 +13,15 @@ func init() {
 }
 
 type (
-	CommandHandler interface {
-		Serve(*bufio.Writer, string, []protocol.RESTPart) (bool, error)
-	}
-	HandleFunc func([]protocol.RESTPart) (*protocol.REST, error)
-
 	RedisServer struct {
 		conn     net.Listener
-		handlers []CommandHandler
+		handlers []Handler
 		handle   map[string]HandleFunc
 	}
 )
 
-func NewREST(datas ...interface{}) *protocol.REST {
-	ret := &protocol.REST{true, "", make([]protocol.RESTPart, 0, len(datas))}
-	for _, d := range datas {
-		switch o := d.(type) {
-		case int, int8, int16, int32, int64:
-			ret.Parts = append(ret.Parts, protocol.RESTPart{':', []byte{}, int(reflect.ValueOf(o).Int())})
-		case uint, uint8, uint16, uint32, uint64:
-			ret.Parts = append(ret.Parts, protocol.RESTPart{':', []byte{}, int(reflect.ValueOf(o).Uint())})
-		case []byte:
-			ret.Parts = append(ret.Parts, protocol.RESTPart{'$', o, len(o)})
-		}
-	}
-	return ret
-}
-
-func NewErrorREST(msgs ...string) *protocol.REST {
-	msg := fmt.Sprint("ERR ", strings.Join(msgs, ""))
-	return &protocol.REST{false, msg, []protocol.RESTPart{}}
-}
-
 func NewRedisServer() *RedisServer {
-	ret := &RedisServer{handlers: make([]CommandHandler, 0), handle: make(map[string]HandleFunc)}
+	ret := &RedisServer{handlers: make([]Handler, 0), handle: make(map[string]HandleFunc)}
 	ret.HandleFunc("quit", func([]protocol.RESTPart) (*protocol.REST, error) {
 		return nil, errors.New("客户端主动关闭连接")
 	})
@@ -69,8 +43,8 @@ func (s *RedisServer) Start(port int) error {
 	return nil
 }
 
-func (s *RedisServer) Handle(h CommandHandler) {
-	tmp := make([]CommandHandler, 0, len(s.handlers)+1)
+func (s *RedisServer) Handle(h Handler) {
+	tmp := make([]Handler, 0, len(s.handlers)+1)
 	tmp = append(tmp, h)
 	tmp = append(tmp, s.handlers...)
 	s.handlers = tmp
