@@ -13,20 +13,15 @@ func init() {
 }
 
 type (
-	CommandHandler interface {
-		Serve(*bufio.Writer, string, []protocol.RESTPart) (bool, error)
-	}
-	HandleFunc func([]protocol.RESTPart) (*protocol.REST, error)
-
 	RedisServer struct {
 		conn     net.Listener
-		handlers []CommandHandler
+		handlers []Handler
 		handle   map[string]HandleFunc
 	}
 )
 
 func NewRedisServer() *RedisServer {
-	ret := &RedisServer{handlers: make([]CommandHandler, 0), handle: make(map[string]HandleFunc)}
+	ret := &RedisServer{handlers: make([]Handler, 0), handle: make(map[string]HandleFunc)}
 	ret.HandleFunc("quit", func([]protocol.RESTPart) (*protocol.REST, error) {
 		return nil, errors.New("客户端主动关闭连接")
 	})
@@ -48,11 +43,16 @@ func (s *RedisServer) Start(port int) error {
 	return nil
 }
 
-func (s *RedisServer) Handle(h CommandHandler) {
-	tmp := make([]CommandHandler, 0, len(s.handlers)+1)
-	tmp = append(tmp, h)
-	tmp = append(tmp, s.handlers...)
-	s.handlers = tmp
+func (s *RedisServer) Handle(o interface{}) {
+	if o == nil {
+		return
+	}
+	if h, ok := o.(Handler); ok {
+		s.handlers = append(s.handlers, h)
+	} else {
+		h := NewCommonHandler(o)
+		s.handlers = append(s.handlers, h)
+	}
 }
 
 func (s *RedisServer) HandleFunc(cmd string, f HandleFunc) {
@@ -72,8 +72,8 @@ func (s *RedisServer) Serve(w *bufio.Writer, cmd string, p []protocol.RESTPart) 
 }
 
 func (s *RedisServer) call_handlers(w *bufio.Writer, cmd string, p []protocol.RESTPart) (bool, error) {
-	for _, h := range s.handlers {
-		if p, err := h.Serve(w, cmd, p); p || err != nil {
+	for i := len(s.handlers) - 1; i >= 0; i-- {
+		if p, err := s.handlers[i].Serve(w, cmd, p); p || err != nil {
 			return p, err
 		}
 	}
