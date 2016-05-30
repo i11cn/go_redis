@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"github.com/i11cn/go_logger"
 	"github.com/i11cn/go_redis/protocol"
 	"net"
 	"strings"
+	"time"
 )
 
 func init() {
@@ -17,11 +19,18 @@ type (
 		conn     net.Listener
 		handlers []Handler
 		handle   map[string]HandleFunc
+		log      *logger.Logger
 	}
 )
 
+func init() {
+	logger.GetLogger("redis").AddAppender(logger.NewConsoleAppender("%T [%N] %L - %M"))
+	logger.GetLogger("redis").AddAppender(logger.NewSplittedFileAppender("%T [%N] %L - %M", "redis.log", 24*time.Hour))
+}
+
 func NewRedisServer() *RedisServer {
-	ret := &RedisServer{handlers: make([]Handler, 0), handle: make(map[string]HandleFunc)}
+	ret := &RedisServer{handlers: make([]Handler, 0), handle: make(map[string]HandleFunc), log: logger.GetLogger("redis")}
+	ret.log.Trace("创建 Redis 服务器")
 	ret.HandleFunc("quit", func([]protocol.RESTPart) (*protocol.REST, error) {
 		return nil, errors.New("客户端主动关闭连接")
 	})
@@ -44,6 +53,7 @@ func (s *RedisServer) Start(port int) error {
 }
 
 func (s *RedisServer) Handle(o interface{}) {
+	s.log.Trace("准备注册对象 ", o)
 	if o == nil {
 		return
 	}
@@ -64,7 +74,7 @@ func (s *RedisServer) Serve(w *bufio.Writer, cmd string, p []protocol.RESTPart) 
 		if resp, err := f(p); err != nil {
 			return false, err
 		} else {
-			_, err := w.Write(protocol.EncodeREST(resp))
+			_, err := w.Write(protocol.EncodeRespREST(resp))
 			return true, err
 		}
 	}
@@ -105,7 +115,7 @@ func (s *RedisServer) client_routine(conn net.Conn) {
 						msg = fmt.Sprintf("ERR unknown command '%s'", cmd)
 					}
 					resp := &protocol.REST{false, msg, nil}
-					if _, err := writer.Write(protocol.EncodeREST(resp)); err != nil {
+					if _, err := writer.Write(protocol.EncodeRespREST(resp)); err != nil {
 						return
 					}
 				}
