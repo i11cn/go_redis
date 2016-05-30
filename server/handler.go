@@ -21,6 +21,12 @@ type (
 	}
 )
 
+func NewCommonHandler(o interface{}) *CommonHandler {
+	ret := &CommonHandler{log: logger.GetLogger("redis")}
+	ret.Handle(o)
+	return ret
+}
+
 func (ch *CommonHandler) Init(o interface{}) {
 	t := reflect.TypeOf(o)
 	fmt.Println(t.Name(), "共有", t.NumMethod(), "个方法")
@@ -31,6 +37,23 @@ func (ch *CommonHandler) Init(o interface{}) {
 
 func (ch *CommonHandler) SetLogger(log *logger.Logger) {
 	ch.log = log
+}
+
+func (ch *CommonHandler) Handle(o interface{}) {
+	ch.handle = make(map[string]func([]protocol.RESTPart) (*protocol.REST, error))
+	method_names := make([]string, 0)
+	t := reflect.TypeOf(o)
+	for i := 0; i < t.NumMethod(); i++ {
+		if len(t.Method(i).PkgPath) == 0 {
+			method_names = append(method_names, t.Method(i).Name)
+		}
+	}
+	v := reflect.ValueOf(o)
+	for _, n := range method_names {
+		var f func([]protocol.RESTPart) (*protocol.REST, error)
+		reflect.ValueOf(&f).Elem().Set(v.MethodByName(n))
+		ch.handle[strings.ToUpper(n)] = f
+	}
 }
 
 func (ch *CommonHandler) Serve(w *bufio.Writer, cmd string, p []protocol.RESTPart) (bool, error) {
