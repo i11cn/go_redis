@@ -183,7 +183,6 @@ func set_multi_parts(buf *bytes.Buffer, i int) {
 func add_part(buf *bytes.Buffer, p RESTPart) {
 	if p.Data == nil {
 		buf.WriteString("$-1")
-		buf.WriteString("\r\n")
 	} else if len(p.Data) > 0 {
 		buf.WriteByte('$')
 		buf.WriteString(strconv.Itoa(len(p.Data)))
