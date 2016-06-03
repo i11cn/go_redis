@@ -30,22 +30,28 @@ func (p RESTPart) String() string {
 
 func EncodeRespREST(r *REST) []byte {
 	var buf bytes.Buffer
-	total_part := len(r.Parts)
-	if total_part > 1 {
-		set_multi_parts(&buf, total_part)
-		for _, p := range r.Parts {
-			add_part(&buf, p)
+	if r.Parts == nil {
+		if r.Success {
+			buf.WriteByte('+')
+			buf.WriteString(r.Message)
+			buf.WriteString("\r\n")
+		} else {
+			buf.WriteByte('-')
+			buf.WriteString(r.Message)
+			buf.WriteString("\r\n")
 		}
-	} else if total_part == 1 {
-		add_part(&buf, r.Parts[0])
-	} else if r.Success {
-		buf.WriteByte('+')
-		buf.WriteString(r.Message)
-		buf.WriteString("\r\n")
 	} else {
-		buf.WriteByte('-')
-		buf.WriteString(r.Message)
-		buf.WriteString("\r\n")
+		total_part := len(r.Parts)
+		if total_part > 1 {
+			set_multi_parts(&buf, total_part)
+			for _, p := range r.Parts {
+				add_part(&buf, p)
+			}
+		} else if total_part == 1 {
+			add_part(&buf, r.Parts[0])
+		} else if r.Parts != nil {
+			buf.WriteString("*0\r\n")
+		}
 	}
 	return buf.Bytes()
 }

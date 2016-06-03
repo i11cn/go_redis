@@ -11,9 +11,6 @@ import (
 	"time"
 )
 
-func init() {
-}
-
 type (
 	RedisServer struct {
 		conn     net.Listener
@@ -24,8 +21,8 @@ type (
 )
 
 func init() {
-	logger.GetLogger("redis").AddAppender(logger.NewConsoleAppender("%T [%N] %L - %M"))
-	logger.GetLogger("redis").AddAppender(logger.NewSplittedFileAppender("%T [%N] %L - %M", "redis.log", 24*time.Hour))
+	logger.GetLogger("redis").AddAppender(logger.NewConsoleAppender("%T [%N] %L (%p) - %M"))
+	logger.GetLogger("redis").AddAppender(logger.NewSplittedFileAppender("%T [%N] %L (%p) - %M", "redis.log", 24*time.Hour))
 }
 
 func NewRedisServer() *RedisServer {
@@ -37,7 +34,22 @@ func NewRedisServer() *RedisServer {
 	return ret
 }
 
-func (s *RedisServer) Start(port int) error {
+func (s *RedisServer) Start(addr string) error {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	s.conn = ln
+	for {
+		conn, err := s.conn.Accept()
+		if err == nil {
+			go s.client_routine(conn)
+		}
+	}
+	return nil
+}
+
+func (s *RedisServer) StartOnPort(port int) error {
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		return err

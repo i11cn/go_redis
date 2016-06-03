@@ -105,5 +105,5 @@ func NewREST(datas ...interface{}) *protocol.REST {
 
 func NewErrorREST(msgs ...string) *protocol.REST {
 	msg := fmt.Sprint("ERR ", strings.Join(msgs, ""))
-	return &protocol.REST{false, msg, []protocol.RESTPart{}}
+	return &protocol.REST{false, msg, nil}
 }
